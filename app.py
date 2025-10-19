@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
-# DAP ATLAS — PORT SAR KPIs (MAVIPE SaaS) • layout do print:
-# KPIs (demo) 160 / 25% / 79% / 14 + 3 gráficos:
-# 1) Oil Storage Volume by Date (linha)
-# 2) Waiting Time in Anchorage Zone (barras)
-# 3) Ships in Anchorage vs Not Reporting AIS (linhas)
+# DAP ATLAS — PORT SAR KPIs (MAVIPE SaaS) • v3
+# Layout: SAR à esquerda + painel à direita com KPIs e 3 gráficos.
+# Correções: cores do matplotlib em 0–1; carregamento robusto de imagem; export PNG/PDF.
 
 import streamlit as st
 from pathlib import Path
@@ -14,7 +12,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from PIL import UnidentifiedImageError
 import matplotlib.image as mpimg
 
-# ===== Tema MAVIPE
+# ----------------------------- Tema MAVIPE
 BG      = (11, 18, 33)    # #0b1221
 CARD    = (16, 24, 43)    # #10182b
 BORDER  = (29, 41, 66)    # #1d2942
@@ -43,7 +41,7 @@ html, body, .stApp { background:#0b1221; color:#E6EEFC; font-family:Inter, Segoe
 st.markdown("## 🛰️ DAP ATLAS — **PORT SAR KPIs**")
 st.caption("SAR como base • Overlays simulados • Painel MAVIPE • Export PNG/PDF")
 
-# ===== Controles
+# ----------------------------- Controles
 with st.expander("⚙️ Configurações", expanded=True):
     c1,c2,c3,c4 = st.columns([1.4,1.4,1,1])
     AOI = c1.text_input("AOI ID", "AOI CN-LN-DAL-PORT-2025-01")
@@ -68,12 +66,12 @@ with st.expander("⚙️ Configurações", expanded=True):
     SHOW_P = c14.checkbox("Mostrar Píeres", True)
     SHOW_T = c15.checkbox("Mostrar Tanques", True)
 
-    DEMO = st.checkbox("Travar KPIs para o layout do print (160 / 25% / 79% / 14)", True)
+    DEMO = st.checkbox("Travar KPIs (160 / 25% / 79% / 14)", True)
 
     st.write("### Fonte SAR")
     uploaded = st.file_uploader("Imagem SAR (PNG/JPG/TIFF)", type=["png","jpg","jpeg","tif","tiff"])
 
-# ===== Loader robusto
+# ----------------------------- Loader de imagem robusto
 def load_sar(src):
     try:
         img = Image.open(src); img.load()
@@ -100,13 +98,12 @@ else:
 
 W0,H0 = SAR_RAW.size
 
-# ===== Heurística simples
+# ----------------------------- Pseudo-detector (heurística leve)
 def detect(img, grid, thr_bright, thr_water, seed, cap_v, cap_t, cap_p):
     np.random.seed(seed)
     a = np.array(img, dtype=np.uint8)
     h,w = a.shape
-    gx = max(1, w//grid)
-    gy = max(1, h//grid)
+    gx = max(1, w//grid); gy = max(1, h//grid)
     vessels,tanks,piers = [],[],[]
 
     for y in range(0,h,gy):
@@ -118,8 +115,7 @@ def detect(img, grid, thr_bright, thr_water, seed, cap_v, cap_t, cap_p):
             if mean < thr_water and bright > 0.01:
                 vessels.append((x+gx//2, y+gy//2))
             if mean > 90 and bright > 0.03:
-                r = max(3,int(0.35*min(gx,gy)))
-                tanks.append((x+gx//2, y+gy//2, r))
+                r = max(3,int(0.35*min(gx,gy))); tanks.append((x+gx//2, y+gy//2, r))
 
     band_h = max(6, gy//2)
     for y in range(0,h,band_h):
@@ -135,25 +131,24 @@ def detect(img, grid, thr_bright, thr_water, seed, cap_v, cap_t, cap_p):
 
 vessels,tanks,piers = detect(SAR_RAW, GRID, THR_BRIGHT, THR_WATER, SEED, CAP_V, CAP_T, CAP_P)
 
-# Dark ships subset
+# subset dark
 rng = np.random.default_rng(SEED)
 dark_ratio = 0.18 + 0.12*rng.random()
 dark_n = int(len(vessels)*dark_ratio)
 dark_idx = set(rng.choice(len(vessels), dark_n, replace=False)) if len(vessels) else set()
 
-# KPIs (padrão = heurística; demo = valores fixos do print)
+# KPIs dinâmicos ou travados (demo)
 kpi_vessels = len(vessels)
 kpi_dark_pct = round(100.0*(dark_n/max(1,kpi_vessels)),1)
 kpi_pier_occ = min(100, int(35+50*rng.random()))
 kpi_tanks = len(tanks)
-
 if DEMO:
     kpi_vessels = 160
     kpi_dark_pct = 25.0
     kpi_pier_occ = 79
     kpi_tanks = 14
 
-# ===== Séries para gráficos (simuladas)
+# ----------------------------- Séries simuladas (para gráficos)
 def simulate_series(n=14, seed=101):
     rng = np.random.default_rng(seed)
     dates = [ (datetime.utcnow()-timedelta(days=(n-1-i))).strftime("%b %d") for i in range(n) ]
@@ -165,41 +160,57 @@ def simulate_series(n=14, seed=101):
 
 dates, oil_series, wait_series, ships_series, noais_series = simulate_series(n=14, seed=SEED+21)
 
-# ===== Plot utilitário (matplotlib -> PIL)
+# ----------------------------- Plot helper (cores 0–1 p/ matplotlib)
 def plot_to_img(title, xlab, ylab, series_list, size, legend=False):
     import matplotlib.pyplot as plt
+    # cores 0–1
+    TEXT_MPL   = tuple([c/255 for c in TEXT])
+    MUTED_MPL  = tuple([c/255 for c in MUTED])
+    CARD_MPL   = tuple([c/255 for c in CARD])
+    BG_MPL     = tuple([c/255 for c in BG])
+    BORDER_MPL = tuple([c/255 for c in BORDER])
+
     plt.style.use("default")
-    fig = plt.figure(figsize=(size[0]/100, size[1]/100), dpi=100, facecolor=(BG[0]/255,BG[1]/255,BG[2]/255))
-    ax = plt.axes(facecolor=(CARD[0]/255,CARD[1]/255,CARD[2]/255))
+    fig = plt.figure(figsize=(size[0]/100, size[1]/100), dpi=100, facecolor=BG_MPL)
+    ax = plt.axes(facecolor=CARD_MPL)
+
     x = np.arange(len(dates))
     for s in series_list:
+        y = s["y"]
         if s.get("type","line")=="bar":
-            ax.bar(x, s["y"], alpha=.88, label=s.get("label"))
+            ax.bar(x, y, alpha=.88, label=s.get("label"))
         else:
-            ax.plot(x, s["y"], linewidth=2.2, marker="o", label=s.get("label"))
-    ax.set_title(title, color=TEXT, fontsize=11, pad=8, weight="bold")
-    ax.set_xlabel(xlab, color=MUTED, fontsize=9)
-    ax.set_ylabel(ylab, color=MUTED, fontsize=9)
-    ax.set_xticks(x); ax.set_xticklabels(dates, fontsize=8, color=TEXT)
-    ax.tick_params(axis='y', colors=TEXT, labelsize=8)
-    [sp.set_color((BORDER[0]/255,BORDER[1]/255,BORDER[2]/255)) for sp in ax.spines.values()]
-    ax.grid(color=(0.18,0.24,0.38), alpha=.35, linewidth=.8)
+            ax.plot(x, y, linewidth=2.2, marker="o", label=s.get("label"))
+
+    ax.set_title(title, color=TEXT_MPL, fontsize=11, pad=8, weight="bold")
+    ax.set_xlabel(xlab, color=MUTED_MPL, fontsize=9)
+    ax.set_ylabel(ylab, color=MUTED_MPL, fontsize=9)
+    ax.set_xticks(x); ax.set_xticklabels(dates, fontsize=8, color=TEXT_MPL)
+    ax.tick_params(axis='y', colors=TEXT_MPL, labelsize=8)
+
+    for sp in ax.spines.values():
+        sp.set_color(BORDER_MPL)
+
+    ax.grid(color=(0.18, 0.24, 0.38), alpha=.35, linewidth=.8)
+
     if legend:
         leg = ax.legend(loc="upper left", fontsize=8, frameon=True)
-        leg.get_frame().set_facecolor((CARD[0]/255,CARD[1]/255,CARD[2]/255))
-        leg.get_frame().set_edgecolor((BORDER[0]/255,BORDER[1]/255,BORDER[2]/255))
-    buf = BytesIO(); fig.tight_layout()
+        leg.get_frame().set_facecolor(CARD_MPL)
+        leg.get_frame().set_edgecolor(BORDER_MPL)
+
+    buf = BytesIO()
+    fig.tight_layout()
     fig.savefig(buf, format="png", dpi=100, facecolor=fig.get_facecolor(), bbox_inches="tight")
     plt.close(fig); buf.seek(0)
     return Image.open(buf).convert("RGB")
 
-# ===== Render composto
+# ----------------------------- Render composto
 def render():
     CAN_W, CAN_H = 1920, 1080
     LEFT_W = int(CAN_W*0.60)
     RIGHT_W = CAN_W - LEFT_W
 
-    # Esquerda: SAR + overlays
+    # SAR à esquerda
     sar = SAR_RAW.convert("RGB")
     sar = ImageOps.fit(sar, (LEFT_W, CAN_H), Image.LANCZOS)
     dL = ImageDraw.Draw(sar); sx,sy = LEFT_W/W0, CAN_H/H0
@@ -216,7 +227,7 @@ def render():
             r=int(r0*(sx+sy)/2)
             dL.ellipse([cx*sx-r,cy*sy-r,cx*sx+r,cy*sy+r], outline=YELLOW, width=2)
 
-    # Direita: painel
+    # Painel à direita
     panel = Image.new("RGB",(RIGHT_W,CAN_H), BG)
     p = ImageDraw.Draw(panel)
 
@@ -231,7 +242,7 @@ def render():
            fill=MUTED, font=font(False,16))
     panel.paste(head,(16,16))
 
-    # KPI bar (4 colunas)
+    # KPI bar
     kpi_y=136; kpi_h=92; card_w=RIGHT_W-32
     kbar = Image.new("RGB",(card_w,kpi_h),(13,20,36)); kd=ImageDraw.Draw(kbar)
     kd.rectangle([0,0,card_w-1,kpi_h-1], outline=BORDER, width=2)
@@ -297,3 +308,4 @@ with c2:
                            file_name="DAP_ATLAS_PORT_SAR_KPIs.pdf", mime="application/pdf")
     except Exception as e:
         st.info(f"PDF opcional indisponível ({e}). Instale reportlab para habilitar.")
+
