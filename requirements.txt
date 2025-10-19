@@ -1,0 +1,20 @@
+# ==== Core ====
+streamlit==1.38.0
+pandas==2.2.2
+numpy==1.26.4
+
+# ==== Export e manipulação ====
+reportlab==4.2.2
+Pillow==10.4.0
+
+# ==== Visuals e gráficos ====
+matplotlib==3.9.2
+plotly==5.24.1
+
+# ==== Utilidades ====
+requests==2.32.3
+python-dateutil==2.9.0.post0
+
+# ==== Extras opcionais para compatibilidade HTML/CSS ====
+jinja2==3.1.4
+beautifulsoup4==4.12.3
