@@ -1,252 +1,272 @@
 # -*- coding: utf-8 -*-
-# DAP ATLAS — Port Monitoring from Satellite Imagery (MAVIPE SaaS — Compact One-Screen)
-# Mostra tudo em uma única tela (grade 2x3), com export do quadro em PNG/PDF.
+# DAP ATLAS — PORT SITREP (Static Poster 1920x1080, MAVIPE style)
+# Output: PNG + PDF for PowerPoint
+#
+# Optional assets in the working folder:
+#  - port_sat.png               (map/satellite background, left side)
+#  - dapatlas_whitebg.png       (logo, panel header)
 
-import streamlit as st
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-from io import BytesIO
-from datetime import datetime, timedelta
 from pathlib import Path
-from PIL import Image, ImageOps, ImageDraw
+from datetime import datetime, timedelta
+from io import BytesIO
 
-# ---------------------- THEME ----------------------
-PRIMARY   = "#00E3A5"
-BG_DARK   = "#0b1221"
-CARD      = "#10182b"
-TEXT      = "#E6EEFC"
-MUTED     = "#9fb0c9"
-BORDER    = "#1d2942"
+import numpy as np
+import pandas as pd
+from PIL import Image, ImageDraw, ImageFont, ImageOps
 
-st.set_page_config(page_title="DAP ATLAS — Port Monitoring (Compact)", page_icon="🛰️", layout="wide")
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
 
-# CSS: reduzir paddings e esconder menu/rodapé
-st.markdown(f"""
-<style>
-:root {{
-  --bg:{BG_DARK}; --card:{CARD}; --text:{TEXT}; --muted:{MUTED}; --border:{BORDER}; --primary:{PRIMARY};
-}}
-html, body, .stApp {{ background: var(--bg); color: var(--text); font-family: Inter, Segoe UI, Roboto, Arial, sans-serif; }}
-.block-container {{ padding-top: .5rem; padding-bottom: .5rem; max-width: 1400px; }}
-#MainMenu {{visibility:hidden}} footer {{visibility:hidden}} header {{visibility:hidden}}
+# ------------------ Theme (MAVIPE)
+BG      = (11, 18, 33)        # #0b1221
+CARD    = (16, 24, 43)        # #10182b
+BORDER  = (29, 41, 66)        # #1d2942
+TEXT    = (230, 238, 252)     # #E6EEFC
+MUTED   = (159, 176, 201)     # #9fb0c9
+PRIMARY = (0, 227, 165)       # #00E3A5
+BLUE    = (61, 163, 255)
+ORANGE  = (255, 105, 74)
 
-.card {{
-  background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 8px;
-  box-shadow: 0 14px 32px rgba(0,0,0,.35);
-}}
-.card h4 {{ margin: 0 0 4px 0; font-size: .95rem; color: {TEXT}; }}
-.small {{ color: var(--muted); font-size: .85rem; }}
-.kpi {{ display:grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap:8px; }}
-.kpi .box{{ background:rgba(255,255,255,.04); border:1px solid var(--border); border-radius:10px; padding:8px }}
-.kpi .k {{ font-weight: 800; font-size: .98rem; }}
-.kpi .l {{ color: var(--muted); font-size:.78rem }}
-hr {{ border: none; height: 1px; background: var(--border); margin: 6px 0 }}
-.table-wrap .dataframe td, .table-wrap .dataframe th {{ color:{TEXT}; border-color: {BORDER}; font-size:.82rem; }}
-h2, h3 {{ margin: 0 0 6px 0; }}
-</style>
-""", unsafe_allow_html=True)
+# ------------------ Canvas
+W, H = 1920, 1080
+LEFT_W = int(W * 0.60)   # mapa
+RIGHT_W = W - LEFT_W     # painel
 
-# ---------------------- DATA (mock) ----------------------
-np.random.seed(7)
-today = datetime(2024, 9, 7)
-dates = pd.date_range(start=today- timedelta(days=15), end=today, freq="D")
+# ------------------ Helper: text
+def draw_text(d: ImageDraw.Draw, xy, txt, size=28, fill=TEXT, bold=False):
+    try:
+        # tenta fontes do sistema (opcional)
+        fontname = "Inter-Bold.ttf" if bold else "Inter-Regular.ttf"
+        f = ImageFont.truetype(fontname, size)
+    except Exception:
+        f = ImageFont.load_default()
+    d.text(xy, txt, fill=fill, font=f)
 
-weather = ["Clear","Fog","Storm","Rain"]
-status  = ["Increase","Decrease"]
-sched = pd.DataFrame({
-    "Year": dates.year,
-    "Quarter": ["Qtr 3"]*len(dates),
-    "Month": dates.strftime("%B"),
-    "Day": dates.day,
-    "Weather Conditions": np.random.choice(weather, len(dates), p=[.45,.25,.2,.10]),
-    "Port Activity Status": np.random.choice(status, len(dates))
-})
+# ------------------ Helper: chart -> PIL Image
+def fig_to_img(fig, bg=BG):
+    buf = BytesIO()
+    fig.savefig(buf, format="png", dpi=160, bbox_inches="tight", facecolor=np.array(bg)/255.0)
+    buf.seek(0)
+    return Image.open(buf)
 
-oil_vol = (18 + np.sin(np.linspace(0,3,len(dates)))*5 + np.random.uniform(-1,1,len(dates))).round(2)  # M bbl
-wait_hours = (np.random.uniform(10,42,len(dates))).round(1)
-ships_total = (15 + np.random.randint(-6,8,len(dates))).clip(6)  # ancorados
-ships_dark  = (np.random.binomial(n=3,p=0.35,size=len(dates))).astype(int)
-forecast_dates = pd.date_range(end=today+timedelta(days=15), periods=15)
-forecast_vals  = (18 + np.sin(np.linspace(1.2,2.8,len(forecast_dates)))*4 + np.random.uniform(-1,1,len(forecast_dates))).round(2)
-
-kpi_oil_peak = oil_vol.max()
-kpi_wait_avg = wait_hours.mean().round(1)
-kpi_dark_pct = (ships_dark.sum()/ships_total.sum()*100).round(1)
-
-AOI = "AOI CN-LN-DAL-PORT-2025-01"
-SOURCE = "Optical (30 cm) + SAR (Spot) • Multi-vendor"
-GENERATED = datetime.now().strftime("%d/%m/%Y %H:%M")
-
-# ---------------------- HEADER COMPACTO ----------------------
-left, right = st.columns([0.8, 0.2])
-with left:
-    st.markdown("## 🛰️ DAP ATLAS — **Port Monitoring Indexes** (Compact)")
-    st.caption(f"**AOI:** {AOI} • **Source:** {SOURCE} • **Generated:** {GENERATED}")
-with right:
-    logo_p = Path("dapatlas_whitebg.png")
-    if logo_p.exists():
-        st.image(str(logo_p), width=110)
-
-# ---------------------- KPIs FINOS ----------------------
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.markdown('<div class="kpi">', unsafe_allow_html=True)
-st.markdown(f'<div class="box"><div class="k">{kpi_oil_peak:.2f} M bbl</div><div class="l">Peak Oil Storage</div></div>', unsafe_allow_html=True)
-st.markdown(f'<div class="box"><div class="k">{kpi_wait_avg} h</div><div class="l">Avg Waiting Time</div></div>', unsafe_allow_html=True)
-st.markdown(f'<div class="box"><div class="k">{ships_total[-1]}</div><div class="l">Ships in Anchorage</div></div>', unsafe_allow_html=True)
-st.markdown(f'<div class="box"><div class="k">{ships_dark[-1]}</div><div class="l">Ships w/o AIS (today)</div></div>', unsafe_allow_html=True)
-st.markdown(f'<div class="box"><div class="k">{kpi_dark_pct}%</div><div class="l">No-AIS Share</div></div>', unsafe_allow_html=True)
-st.markdown(f'<div class="box"><div class="k">{dates[-1].strftime("%d %b %Y")}</div><div class="l">Last Acquisition</div></div>', unsafe_allow_html=True)
-st.markdown('</div></div>', unsafe_allow_html=True)
-
-# helper p/ figuras slim no padrão MAVIPE
-def make_fig(figsize=(5.8,2.6), labelsize=8):
+def make_axes(figsize=(4.4,2.2)):
     fig, ax = plt.subplots(figsize=figsize)
-    fig.subplots_adjust(left=0.08, right=0.98, top=0.85, bottom=0.22)
-    fig.patch.set_facecolor(BG_DARK)
-    ax.set_facecolor(CARD)
+    fig.patch.set_facecolor(np.array(BG)/255.0)
+    ax.set_facecolor(np.array(CARD)/255.0)
     for s in ['bottom','top','left','right']:
-        ax.spines[s].set_color(MUTED)
-    ax.tick_params(colors=TEXT, labelsize=labelsize)
+        ax.spines[s].set_color('#1d2942')
+    ax.tick_params(colors='#E6EEFC', labelsize=8)
     ax.grid(True, color="#22304f", alpha=.35, linestyle="--", linewidth=.6)
     return fig, ax
 
-# ---------------------- GRADE 2x3 (sem scroll) ----------------------
-# Linha 1: Schedule | Oil | Waiting
-r1c1, r1c2, r1c3 = st.columns([0.36, 0.32, 0.32])
+# ------------------ Mock data (substitua pelos seus)
+np.random.seed(7)
+today = datetime(2024, 9, 7)
+dates = pd.date_range(start=today - timedelta(days=15), end=today, freq="D")
+oil = (18 + np.sin(np.linspace(0,3,len(dates)))*5 + np.random.uniform(-1,1,len(dates))).round(2)
+wait_h = (np.random.uniform(10,42,len(dates))).round(1)
+ships = (15 + np.random.randint(-6,8,len(dates))).clip(6)
+dark  = (np.random.binomial(n=3,p=0.35,size=len(dates))).astype(int)
+fdates = pd.date_range(end=today+timedelta(days=15), periods=15)
+fores  = (18 + np.sin(np.linspace(1.2,2.8,len(fdates)))*4 + np.random.uniform(-1,1,len(fdates))).round(2)
 
-with r1c1:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("#### Satellite Imagery Acquisition Schedule")
-    st.dataframe(sched.reset_index(drop=True), height=210, use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+peak_oil = oil.max()
+avg_wait = wait_h.mean().round(1)
+dark_share = (dark.sum()/ships.sum()*100).round(1)
 
-with r1c2:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("#### Oil Storage Volume by Date")
-    fig1, ax1 = make_fig()
-    ax1.plot(dates, oil_vol, linewidth=2, color=PRIMARY)
-    ax1.fill_between(dates, oil_vol, color=PRIMARY, alpha=.18)
-    ax1.set_ylabel("Million Barrels", color=TEXT, fontsize=9)
-    ax1.set_xlabel("Acquisition Date", color=TEXT, fontsize=9)
-    st.pyplot(fig1, transparent=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+AOI     = "AOI CN-LN-DAL-PORT-2025-01"
+SOURCE  = "Optical (30 cm) + SAR (Spot) • Multi-vendor"
+GEN     = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-with r1c3:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("#### Waiting Time in Anchorage Zone")
-    fig2, ax2 = make_fig()
-    ax2.bar(dates, wait_hours, width=0.75, color="#3aa3ff")
-    ax2.set_ylabel("Avg Time (hours)", color=TEXT, fontsize=9)
-    ax2.set_xlabel("Acquisition Date", color=TEXT, fontsize=9)
-    st.pyplot(fig2, transparent=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+# ------------------ Base canvas
+canvas = Image.new("RGB", (W, H), BG)
+draw   = ImageDraw.Draw(canvas)
 
-# Linha 2: Ships vs No-AIS | Forecast | Sitrep
-r2c1, r2c2, r2c3 = st.columns([0.36, 0.32, 0.32])
+# ------------------ LEFT: Map
+left = Image.new("RGB", (LEFT_W, H), BG)
+map_p = Path("port_sat.png")
+if map_p.exists():
+    img = Image.open(map_p).convert("RGB")
+    img = ImageOps.fit(img, (LEFT_W, H), Image.LANCZOS)
+    left.paste(img, (0,0))
+else:
+    # placeholder quadriculado
+    tile = Image.new("RGB", (64,64), (20,30,50))
+    d2 = ImageDraw.Draw(tile)
+    d2.rectangle([0,0,63,63], outline=(35,50,80))
+    patt = Image.new("RGB", (LEFT_W, H), (12,19,34))
+    for y in range(0, H, 64):
+        for x in range(0, LEFT_W, 64):
+            patt.paste(tile, (x,y))
+    left = patt
 
-with r2c1:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("#### Ships in Anchorage vs Not Reporting AIS")
-    fig3, ax3 = make_fig()
-    ax3.plot(dates, ships_total, linewidth=2, label="Anchorage", color="#4da3ff")
-    ax3.plot(dates, ships_dark, linewidth=2, label="No AIS", color="#ff694a")
-    leg = ax3.legend(facecolor=CARD, labelcolor=TEXT, edgecolor=BORDER, fontsize=8)
-    ax3.set_ylabel("Ships", color=TEXT, fontsize=9)
-    ax3.set_xlabel("Acquisition Date", color=TEXT, fontsize=9)
-    st.pyplot(fig3, transparent=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+# pequena faixa de legenda (opcional)
+leg = Image.new("RGBA", (320,120), (0,0,0,120))
+dleg = ImageDraw.Draw(leg)
+draw_text(dleg, (12,8), "PORT MONITORING", 20, TEXT, True)
+draw_text(dleg, (12,40), "Anchorage / Yard / Storage areas", 16, MUTED)
+left.paste(leg, (16, H-136), leg)
 
-with r2c2:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("#### 15-day Forecast — Oil Storage")
-    fig4, ax4 = make_fig()
-    ax4.plot(forecast_dates, forecast_vals, linewidth=2, color=PRIMARY)
-    ax4.fill_between(forecast_dates, forecast_vals, color=PRIMARY, alpha=.18)
-    ax4.set_ylabel("Million Barrels", color=TEXT, fontsize=9)
-    ax4.set_xlabel("Date", color=TEXT, fontsize=9)
-    st.pyplot(fig4, transparent=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+canvas.paste(left, (0,0))
 
-with r2c3:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-    st.markdown("#### Situational Report")
-    peak_idx = int(np.argmax(oil_vol))
-    trend_note = "decreasing" if forecast_vals[-1] < np.median(forecast_vals) else "increasing"
-    st.markdown(f"""
-- Storage shows variability; **peak {kpi_oil_peak:.2f} M bbl** on **{dates[peak_idx].strftime('%d %b %Y')}**.  
-- Avg waiting time **{kpi_wait_avg} h**; spikes under fog/storm.  
-- **No-AIS share** across period: **{kpi_dark_pct}%**.  
-- 15-day outlook suggests **{trend_note}** activity; adjust berth allocation and tanker scheduling.  
-- Alerts: raise when **No-AIS > 15%** or **waiting > 36 h**.
-""")
-    st.caption("Auto-generated from satellite-derived indicators (optical + SAR).")
-    st.markdown('</div>', unsafe_allow_html=True)
+# divisória
+draw.line([(LEFT_W,0),(LEFT_W,H)], fill=BORDER, width=2)
 
-# ---------------------- EXPORT (QUADRO INTEIRO) ----------------------
-st.divider()
-st.write("**Export**")
+# ------------------ RIGHT: Intelligence Panel
+panel = Image.new("RGB", (RIGHT_W, H), BG)
+pdraw = ImageDraw.Draw(panel)
 
-def fig_to_png(fig):
-    buf = BytesIO()
-    fig.savefig(buf, format="png", dpi=220, bbox_inches="tight", facecolor=BG_DARK)
-    buf.seek(0);  return Image.open(buf)
+# Header block
+header_h = 110
+head = Image.new("RGB", (RIGHT_W-32, header_h), CARD)
+hdraw = ImageDraw.Draw(head)
 
-img1, img2, img3, img4 = map(fig_to_png, [fig1, fig2, fig3, fig4])
+# logo
+logo_p = Path("dapatlas_whitebg.png")
+if logo_p.exists():
+    logo = Image.open(logo_p).convert("RGBA")
+    logo = ImageOps.contain(logo, (84,84), Image.LANCZOS)
+else:
+    # fallback
+    logo = Image.new("RGBA", (84,84), (255,255,255,255))
+    d3 = ImageDraw.Draw(logo); d3.text((18,28), "DA", fill=(0,0,0), font=ImageFont.load_default())
 
-def compose_dashboard_png():
-    # mosaico 2x2 dos gráficos + cabeçalho texto; tabela e sitrep como blocos raster
-    # captura rápida: renderiza HTML simples dos blocos texto via PIL (labels)
-    pad = 18
-    # Linha 1 (Oil | Waiting)
-    row1_h = max(img1.height, img2.height)
-    row1 = Image.new("RGB", (img1.width + pad + img2.width, row1_h), (11,18,33))
-    row1.paste(img1, (0, row1_h - img1.height))
-    row1.paste(img2, (img1.width + pad, row1_h - img2.height))
-    # Linha 2 (Ships | Forecast)
-    row2_h = max(img3.height, img4.height)
-    row2 = Image.new("RGB", (img3.width + pad + img4.width, row2_h), (11,18,33))
-    row2.paste(img3, (0, row2_h - img3.height))
-    row2.paste(img4, (img3.width + pad, row2_h - img4.height))
-    # Cabeçalho
-    W = max(row1.width, row2.width)
-    header_h = 90
-    header = Image.new("RGB", (W, header_h), (11,18,33))
-    d = ImageDraw.Draw(header)
-    d.text((12, 12), "DAP ATLAS — Port Monitoring Indexes (Compact)", fill=(230,238,252))
-    d.text((12, 46), f"AOI: {AOI}  •  Source: {SOURCE}  •  Generated: {GENERATED}", fill=(159,176,201))
-    # Compose
-    canvas = Image.new("RGB", (W, header_h + row1.height + pad + row2.height), (11,18,33))
-    canvas.paste(header, (0, 0))
-    canvas.paste(row1, (0, header_h))
-    canvas.paste(row2, (0, header_h + row1.height + pad))
-    return canvas
+head.paste(logo, (16,13), logo)
+draw_text(hdraw, (120,18), "DAP ATLAS — PORT SITREP", 28, TEXT, True)
+draw_text(hdraw, (120,56), "Satellite-derived KPIs • C2 Support", 20, MUTED)
+# badge
+badge = Image.new("RGBA", (RIGHT_W-480, 34), (0,0,0,0))
+bdrw = ImageDraw.Draw(badge)
+bdrw.rounded_rectangle([0,0,badge.width-1,33], radius=16, outline=(0,227,165,255), width=2, fill=(0,227,165,30))
+draw_text(bdrw, (12,7), f"{AOI} • Live 24/7", 18, (0,227,165), True)
+head.paste(badge, (RIGHT_W-32-badge.width-8, 36), badge)
 
-dash_png = compose_dashboard_png()
-buf_png = BytesIO(); dash_png.save(buf_png, format="PNG"); buf_png.seek(0)
+# small footer of header
+draw_text(hdraw, (120,84), f"Source: {SOURCE}  •  Generated: {GEN}", 16, MUTED)
 
-col_dl1, col_dl2 = st.columns(2)
-with col_dl1:
-    st.download_button("📸 Download One-Screen Dashboard (PNG)", data=buf_png.getvalue(),
-                       file_name="DAP_ATLAS_Port_Dashboard_Compact.png", mime="image/png")
+# mount header
+panel.paste(head, (16,16))
 
-def export_pdf(png_bytes: bytes):
+# KPI chips
+kpi_y = 146
+chip_w, chip_h, gap = 206, 76, 12
+kpis = [
+    (f"{peak_oil:.2f} M bbl", "Peak Oil Storage"),
+    (f"{avg_wait} h",         "Avg Waiting Time"),
+    (f"{ships[-1]}",          "Ships in Anchorage"),
+    (f"{dark[-1]}",           "Ships w/o AIS (today)"),
+    (f"{dark_share} %",       "No-AIS Share"),
+    (dates[-1].strftime("%d %b %Y"), "Last Acquisition"),
+]
+for i,(k,v) in enumerate(kpis):
+    x = 16 + (i%3)*(chip_w+gap)
+    y = kpi_y + (i//3)*(chip_h+gap)
+    chip = Image.new("RGB", (chip_w, chip_h), CARD)
+    cdrw = ImageDraw.Draw(chip)
+    cdrw.rectangle([0,0,chip_w-1,chip_h-1], outline=BORDER, width=1)
+    draw_text(cdrw, (12,10), k, 22, TEXT, True)
+    draw_text(cdrw, (12,44), v, 16, MUTED)
+    panel.paste(chip,(x,y))
+
+# Chart cards (2x2)
+card_w = RIGHT_W-32
+row_h  = 260
+grid_y = kpi_y + 2*(chip_h+gap) + 12
+
+def chart_card(title, fig):
+    img = fig_to_img(fig)
+    card = Image.new("RGB", (card_w, row_h), CARD)
+    c = ImageDraw.Draw(card)
+    c.rectangle([0,0,card_w-1,row_h-1], outline=BORDER, width=1)
+    draw_text(c, (12,8), title, 20, TEXT, True)
+    # paste chart
+    chart = ImageOps.contain(img, (card_w-24, row_h-36), Image.LANCZOS)
+    card.paste(chart, (12, 28))
+    return card
+
+# Oil storage (line/area)
+fig1, ax1 = make_axes((6.2,2.1))
+ax1.plot(dates, oil, color=np.array(PRIMARY)/255.0, linewidth=2)
+ax1.fill_between(dates, oil, color=np.array(PRIMARY)/255.0, alpha=.18)
+ax1.set_ylabel("Million Barrels", color="#E6EEFC", fontsize=9)
+ax1.set_xlabel("Acquisition Date", color="#E6EEFC", fontsize=9)
+
+# Waiting (bars)
+fig2, ax2 = make_axes((6.2,2.1))
+ax2.bar(dates, wait_h, color=np.array(BLUE)/255.0, width=0.75)
+ax2.set_ylabel("Avg Time (hours)", color="#E6EEFC", fontsize=9)
+ax2.set_xlabel("Acquisition Date", color="#E6EEFC", fontsize=9)
+
+# Ships vs No-AIS (lines)
+fig3, ax3 = make_axes((6.2,2.1))
+ax3.plot(dates, ships, color=np.array(BLUE)/255.0, linewidth=2, label="Anchorage")
+ax3.plot(dates, dark,  color=np.array(ORANGE)/255.0, linewidth=2, label="No AIS")
+ax3.legend(facecolor=np.array(CARD)/255.0, edgecolor="#1d2942", labelcolor="#E6EEFC", fontsize=8)
+ax3.set_ylabel("Ships", color="#E6EEFC", fontsize=9)
+ax3.set_xlabel("Acquisition Date", color="#E6EEFC", fontsize=9)
+
+# Forecast (line/area)
+fig4, ax4 = make_axes((6.2,2.1))
+ax4.plot(fdates, fores, color=np.array(PRIMARY)/255.0, linewidth=2)
+ax4.fill_between(fdates, fores, color=np.array(PRIMARY)/255.0, alpha=.18)
+ax4.set_ylabel("Million Barrels", color="#E6EEFC", fontsize=9)
+ax4.set_xlabel("Date", color="#E6EEFC", fontsize=9)
+
+# mount 2x2 grid
+c1 = chart_card("Oil Storage Volume by Date", fig1)
+c2 = chart_card("Waiting Time in Anchorage Zone", fig2)
+c3 = chart_card("Ships in Anchorage vs Not Reporting AIS", fig3)
+c4 = chart_card("15-day Forecast — Oil Storage", fig4)
+
+panel.paste(c1, (16, grid_y))
+panel.paste(c2, (16, grid_y + row_h + 12))
+panel.paste(c3, (16, grid_y + 2*(row_h + 12)))
+# c4 ocupa metade da altura restante: ajusta para caber sobre o mapa? Mantemos dentro do painel:
+panel.paste(c4, (16, grid_y + 3*(row_h + 12)))
+
+# Sitrep box (texto curto) — opcional: trocar pelo seu texto
+sit = Image.new("RGB", (card_w, 140), CARD)
+sdrw = ImageDraw.Draw(sit)
+sdrw.rectangle([0,0,card_w-1,139], outline=BORDER, width=1)
+draw_text(sdrw, (12,8), "Situational Report", 20, TEXT, True)
+lines = [
+    f"Storage variability; peak {peak_oil:.2f} M bbl on {dates[oil.argmax()].strftime('%d %b %Y')}.",
+    f"Average waiting time {avg_wait} h (spikes under fog/storm).",
+    f"No-AIS share across period: {dark_share}%.",
+    "15-day outlook suggests decreasing activity.",
+    "Alerts: raise when No-AIS > 15% or waiting > 36 h."
+]
+y = 36
+for t in lines:
+    draw_text(sdrw, (12,y), "• " + t, 18, TEXT); y += 24
+
+# cola o sitrep logo abaixo do header (antes dos charts)
+panel.paste(sit, (16, grid_y - (140 + 12)))
+
+# Footer
+draw_text(pdraw, (16, H-30), "© 2025 MAVIPE Space Systems — DAP ATLAS", 16, MUTED)
+
+# paste panel to canvas
+canvas.paste(panel, (LEFT_W, 0))
+
+# ------------------ Save PNG
+out_png = "DAP_ATLAS_PORT_SITREP.png"
+canvas.save(out_png, format="PNG")
+print(f"[OK] PNG salvo: {out_png}")
+
+# ------------------ Save PDF (one page, landscape A4)
+try:
     from reportlab.lib.pagesizes import landscape, A4
     from reportlab.pdfgen import canvas as pdfcanvas
     from reportlab.lib.utils import ImageReader
-    from io import BytesIO
-    buf = BytesIO()
-    c = pdfcanvas.Canvas(buf, pagesize=landscape(A4))
-    W, H = landscape(A4)
-    img = ImageReader(BytesIO(png_bytes))
+    pdf_buf = BytesIO()
+    c = pdfcanvas.Canvas("DAP_ATLAS_PORT_SITREP.pdf", pagesize=landscape(A4))
+    Wp, Hp = landscape(A4)
+    img_reader = ImageReader(out_png)
     margin = 18
-    c.drawImage(img, margin, margin, width=W-2*margin, height=H-2*margin, mask='auto')
-    c.showPage(); c.save(); buf.seek(0); return buf
-
-with col_dl2:
-    from reportlab.lib.pagesizes import A4, landscape
-    pdf_buf = export_pdf(buf_png.getvalue())
-    st.download_button("📄 Download One-Screen Dashboard (PDF)", data=pdf_buf.getvalue(),
-                       file_name="DAP_ATLAS_Port_Dashboard_Compact.pdf", mime="application/pdf")
-
-st.caption("© 2025 MAVIPE Space Systems — MAVIPE SaaS compact layout (fits 1366×768).")
+    c.drawImage(img_reader, margin, margin, width=Wp-2*margin, height=Hp-2*margin, mask='auto')
+    c.showPage(); c.save()
+    print("[OK] PDF salvo: DAP_ATLAS_PORT_SITREP.pdf")
+except Exception as e:
+    print(f"[WARN] PDF opcional não gerado: {e}")
