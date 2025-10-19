@@ -1,7 +1,9 @@
 # -*- coding: utf-8 -*-
-# DAP ATLAS — PORT SAR KPIs (MAVIPE SaaS) • v5
-# KPIs: Vessels Detected (green=21), Moving Vessels (orange=5), Storage Tanks (cyan=dinâmico)
-# Legenda inclui créditos fixos à Umbra. Export PNG/PDF. Matplotlib com cores 0–1.
+# DAP ATLAS — PORT SAR KPIs (MAVIPE SaaS) • v6
+# Alterações solicitadas:
+# - Sidebar: "Hour of Image Acquisition: 21:15 UTC"
+# - KPIs fixos: Vessels Detected = 27 (verde), Moving Vessels = 4 (laranja)
+# - Gráfico 1: "Oil Storage Volume by Date — Site A"
 
 import streamlit as st
 from pathlib import Path
@@ -12,7 +14,7 @@ from PIL import Image, ImageDraw, ImageFont, ImageOps
 from PIL import UnidentifiedImageError
 import matplotlib.image as mpimg
 
-# ============ Tema / Cores ============
+# ========= Tema / Cores =========
 BG      = (11, 18, 33)    # #0b1221
 CARD    = (16, 24, 43)    # #10182b
 BORDER  = (29, 41, 66)    # #1d2942
@@ -39,10 +41,15 @@ html, body, .stApp { background:#0b1221; color:#E6EEFC; font-family:Inter, Segoe
 </style>
 """, unsafe_allow_html=True)
 
-st.markdown("## 🛰️ DAP ATLAS — **PORT SAR KPIs**")
-st.caption("SAR como base • Overlays simulados • Painel MAVIPE • Export PNG/PDF")
+# ========= Sidebar (pedido) =========
+st.sidebar.markdown("### 📡 Acquisition Info")
+st.sidebar.write("**Hour of Image Acquisition:** 21:15 UTC")
 
-# ============ Controles ============
+# ========= Título =========
+st.markdown("## 🛰️ DAP ATLAS — **PORT SAR KPIs**")
+st.caption("SAR-based observables • Overlays simulados • Painel MAVIPE • Export PNG/PDF")
+
+# ========= Controles =========
 with st.expander("⚙️ Configurações", expanded=True):
     c1,c2,c3 = st.columns([1.5,1.2,0.8])
     AOI     = c1.text_input("AOI ID", "AOI CN-LN-DAL-PORT-2025-01")
@@ -66,13 +73,14 @@ with st.expander("⚙️ Configurações", expanded=True):
     SHOW_P = c13.checkbox("Mostrar Píeres", True)
     SHOW_T = st.checkbox("Mostrar Tanques", True)
 
-    st.write("### KPIs (fixar valores)")
-    lock = st.checkbox("Fixar **Vessels Detected = 21** e **Moving Vessels = 5**", True)
+    st.write("### KPIs (fixar valores — pedido)")
+    # Agora fixa 27 e 4 por padrão (pode desmarcar para usar dinâmico)
+    lock = st.checkbox("Fixar **Vessels Detected = 27** e **Moving Vessels = 4**", True)
 
     st.write("### Fonte SAR")
     uploaded = st.file_uploader("Imagem SAR (PNG/JPG/TIFF)", type=["png","jpg","jpeg","tif","tiff"])
 
-# ============ Loader robusto ============
+# ========= Loader robusto =========
 def load_sar(src):
     try:
         img = Image.open(src); img.load()
@@ -99,7 +107,7 @@ else:
 
 W0,H0 = SAR_RAW.size
 
-# ============ Heurística leve ============
+# ========= Heurística leve =========
 def detect(img, grid, thr_bright, thr_water, seed, cap_v, cap_t, cap_p):
     np.random.seed(seed)
     a = np.array(img, dtype=np.uint8)
@@ -113,10 +121,8 @@ def detect(img, grid, thr_bright, thr_water, seed, cap_v, cap_t, cap_p):
             if tile.size == 0: continue
             mean = float(tile.mean())
             bright = (tile > thr_bright).mean()
-            # água escura + reflexos → candidato a vessel
             if mean < thr_water and bright > 0.01:
                 vessels.append((x+gx//2, y+gy//2))
-            # estrutura circular brilhante → tanque
             if mean > 90 and bright > 0.03:
                 r = max(3,int(0.35*min(gx,gy)))
                 tanks.append((x+gx//2, y+gy//2, r))
@@ -137,19 +143,19 @@ vessels,tanks,piers = detect(SAR_RAW, GRID, THR_BRIGHT, THR_WATER, SEED, CAP_V, 
 
 # Moving / Dark (simples)
 rng = np.random.default_rng(SEED)
-moving_n = min(5, len(vessels)) if lock else min(max(1, len(vessels)//6), 40)
+moving_n = min(4, len(vessels)) if lock else min(max(1, len(vessels)//6), 40)
 moving_idx = set(rng.choice(len(vessels), moving_n, replace=False)) if len(vessels) else set()
 
 dark_ratio = 0.18 + 0.12*rng.random()
 dark_n = int(len(vessels)*dark_ratio)
 dark_idx = set(rng.choice(len(vessels), dark_n, replace=False)) if len(vessels) else set()
 
-# KPIs finais
-kpi_vessels = 21 if lock else len(vessels)
-kpi_moving  = 5  if lock else len(moving_idx)
+# KPIs finais (pedido)
+kpi_vessels = 27 if lock else len(vessels)
+kpi_moving  = 4  if lock else len(moving_idx)
 kpi_tanks   = len(tanks)
 
-# ============ Séries simuladas para gráficos ============
+# ========= Séries simuladas para gráficos =========
 def simulate_series(n=14, seed=101):
     rng = np.random.default_rng(seed)
     dates = [ (datetime.utcnow()-timedelta(days=(n-1-i))).strftime("%b %d") for i in range(n) ]
@@ -161,7 +167,7 @@ def simulate_series(n=14, seed=101):
 
 dates, oil_series, wait_series, ships_series, noais_series = simulate_series(n=14, seed=SEED+21)
 
-# ============ Helper de gráfico (cores 0–1 p/ matplotlib) ============
+# ========= Helper de gráfico (cores 0–1) =========
 def plot_to_img(title, xlab, ylab, series_list, size, legend=False):
     import matplotlib.pyplot as plt
     TEXT_MPL   = tuple([c/255 for c in TEXT])
@@ -200,13 +206,13 @@ def plot_to_img(title, xlab, ylab, series_list, size, legend=False):
     plt.close(fig); buf.seek(0)
     return Image.open(buf).convert("RGB")
 
-# ============ Render composto ============
+# ========= Render composto =========
 def render():
     CAN_W, CAN_H = 1920, 1080
     LEFT_W = int(CAN_W*0.60)
     RIGHT_W = CAN_W - LEFT_W
 
-    # --- SAR à esquerda com overlays
+    # -- SAR à esquerda
     sar = SAR_RAW.convert("RGB")
     sar = ImageOps.fit(sar, (LEFT_W, CAN_H), Image.LANCZOS)
     dL = ImageDraw.Draw(sar); sx,sy = LEFT_W/W0, CAN_H/H0
@@ -229,7 +235,7 @@ def render():
             r=int(r0*(sx+sy)/2)
             dL.ellipse([cx*sx-r,cy*sy-r,cx*sx+r,cy*sy+r], outline=CYAN, width=2)
 
-    # --- Painel à direita
+    # -- Painel à direita
     panel = Image.new("RGB",(RIGHT_W,CAN_H), BG)
     p = ImageDraw.Draw(panel)
 
@@ -245,18 +251,16 @@ def render():
            fill=MUTED, font=font(False,16))
     panel.paste(head,(16,16))
 
-    # KPI bar (3 colunas)
+    # KPIs (3 colunas) — com valores fixados (27 / 4 / tanks dinâmico)
     kpi_y=136; kpi_h=92; card_w=RIGHT_W-32
     kbar = Image.new("RGB",(card_w,kpi_h),(13,20,36)); kd=ImageDraw.Draw(kbar)
     kd.rectangle([0,0,card_w-1,kpi_h-1], outline=BORDER, width=2)
-
     labels = ["Vessels Detected","Moving Vessels","Storage Tanks"]
-    values = [str(21 if lock else len(vessels)),
-              str(5  if lock else len(moving_idx)),
+    values = [str(27 if lock else len(vessels)),
+              str(4  if lock else len(moving_idx)),
               str(len(tanks))]
     colors = [GREEN, ORANGE, CYAN]
     col_w = card_w//3
-
     for i in range(3):
         x0=i*col_w; x1=(i+1)*col_w if i<2 else card_w
         v=values[i]; fv=font(True,28); w=kd.textlength(v,font=fv)
@@ -264,29 +268,32 @@ def render():
         l=labels[i]; fl=font(False,15); w2=kd.textlength(l,font=fl)
         kd.text((x0+(col_w-w2)/2,52), l, fill=MUTED, font=fl)
         if i<2: kd.line([(x1,12),(x1,kpi_h-12)], fill="#22304f", width=1)
-
     panel.paste(kbar,(16,kpi_y))
     gy = kpi_y + kpi_h + 16
 
-    # Gráfico 1 — Oil Storage
-    chart1 = plot_to_img("Oil Storage Volume by Date", "Acquisition Date", "Million Barrels",
-                         [ {"y":oil_series, "label":"Oil Storage"} ], (RIGHT_W-32,250), legend=False)
+    # Gráfico 1 — Oil Storage (Site A)
+    chart1 = plot_to_img("Oil Storage Volume by Date — Site A",
+                         "Acquisition Date", "Million Barrels",
+                         [ {"y":oil_series, "label":"Oil Storage"} ],
+                         (RIGHT_W-32,250), legend=False)
     panel.paste(chart1,(16,gy)); gy += chart1.size[1] + 12
 
     # Gráfico 2 — Waiting Time (Anchorage)
-    chart2 = plot_to_img("Waiting Time in Anchorage Zone", "Acquisition Date", "Avg Time (hours)",
+    chart2 = plot_to_img("Waiting Time in Anchorage Zone",
+                         "Acquisition Date", "Avg Time (hours)",
                          [ {"y":wait_series, "label":"Waiting Time", "type":"bar"} ],
                          (RIGHT_W-32,250), legend=False)
     panel.paste(chart2,(16,gy)); gy += chart2.size[1] + 12
 
     # Gráfico 3 — Ships vs No AIS
-    chart3 = plot_to_img("Ships in Anchorage vs Not Reporting AIS", "Acquisition Date", "Ships",
+    chart3 = plot_to_img("Ships in Anchorage vs Not Reporting AIS",
+                         "Acquisition Date", "Ships",
                          [ {"y":ships_series, "label":"Anchorage"},
                            {"y":noais_series, "label":"No AIS"} ],
                          (RIGHT_W-32,250), legend=True)
     panel.paste(chart3,(16,gy)); gy += chart3.size[1] + 12
 
-    # Legenda + créditos (cartão)
+    # Legenda + créditos
     leg_h = 126
     legend = Image.new("RGB",(RIGHT_W-32,leg_h),(13,20,36)); ld=ImageDraw.Draw(legend)
     ld.rectangle([0,0,legend.size[0]-1,legend.size[1]-1], outline=BORDER, width=2)
@@ -305,7 +312,6 @@ def render():
     ld.line([X0 + 1*GAPX - 7, Y0+34, X0 + 1*GAPX + 7, Y0+34], fill=BLUE, width=3)
     ld.text((X0 + 1*GAPX + 14, Y0+24), "Pier / Active quay", fill=MUTED, font=font(False,14))
 
-    # créditos (2 linhas, estilo relatório)
     credit1 = "SAR Image: Umbra — downloaded from Umbra’s publicly available files. © Umbra."
     credit2 = "Imagery courtesy of Umbra Space; processed via MAVIPE DAP ATLAS (non-commercial demo use)."
     ld.text((12, leg_h-44), credit1, fill=MUTED, font=font(False,12))
@@ -344,4 +350,3 @@ with c2:
                            file_name="DAP_ATLAS_PORT_SAR_KPIs.pdf", mime="application/pdf")
     except Exception as e:
         st.info(f"PDF opcional indisponível ({e}). Instale reportlab para habilitar.")
-
