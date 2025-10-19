@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-# DAP ATLAS — PORT SAR KPIs (MAVIPE SaaS) • v4
-# KPIs: Vessels Detected (green), Moving Vessels (orange), Storage Tanks (cyan)
-# Legenda com créditos Umbra; export PNG/PDF.
+# DAP ATLAS — PORT SAR KPIs (MAVIPE SaaS) • v5
+# KPIs: Vessels Detected (green=21), Moving Vessels (orange=5), Storage Tanks (cyan=dinâmico)
+# Legenda inclui créditos fixos à Umbra. Export PNG/PDF. Matplotlib com cores 0–1.
 
 import streamlit as st
 from pathlib import Path
@@ -137,9 +137,7 @@ vessels,tanks,piers = detect(SAR_RAW, GRID, THR_BRIGHT, THR_WATER, SEED, CAP_V, 
 
 # Moving / Dark (simples)
 rng = np.random.default_rng(SEED)
-moving_n = min(5, len(vessels))
-if lock:
-    moving_n = min(5, len(vessels))
+moving_n = min(5, len(vessels)) if lock else min(max(1, len(vessels)//6), 40)
 moving_idx = set(rng.choice(len(vessels), moving_n, replace=False)) if len(vessels) else set()
 
 dark_ratio = 0.18 + 0.12*rng.random()
@@ -190,7 +188,7 @@ def plot_to_img(title, xlab, ylab, series_list, size, legend=False):
     ax.set_xticks(x); ax.set_xticklabels(dates, fontsize=8, color=TEXT_MPL)
     ax.tick_params(axis='y', colors=TEXT_MPL, labelsize=8)
     for sp in ax.spines.values(): sp.set_color(BORDER_MPL)
-    ax.grid(color=(0.18,0.24,0.38), alpha=.35, linewidth=.8)
+    ax.grid(color=(0.18, 0.24, 0.38), alpha=.35, linewidth=.8)
 
     if legend:
         leg = ax.legend(loc="upper left", fontsize=8, frameon=True)
@@ -253,7 +251,9 @@ def render():
     kd.rectangle([0,0,card_w-1,kpi_h-1], outline=BORDER, width=2)
 
     labels = ["Vessels Detected","Moving Vessels","Storage Tanks"]
-    values = [str(kpi_vessels), str(kpi_moving), str(kpi_tanks)]
+    values = [str(21 if lock else len(vessels)),
+              str(5  if lock else len(moving_idx)),
+              str(len(tanks))]
     colors = [GREEN, ORANGE, CYAN]
     col_w = card_w//3
 
@@ -287,10 +287,9 @@ def render():
     panel.paste(chart3,(16,gy)); gy += chart3.size[1] + 12
 
     # Legenda + créditos (cartão)
-    leg_h = 110
+    leg_h = 126
     legend = Image.new("RGB",(RIGHT_W-32,leg_h),(13,20,36)); ld=ImageDraw.Draw(legend)
-    legend_box = [0,0,legend.size[0]-1,legend.size[1]-1]
-    ld.rectangle(legend_box, outline=BORDER, width=2)
+    ld.rectangle([0,0,legend.size[0]-1,legend.size[1]-1], outline=BORDER, width=2)
     ld.text((12,8), "Legend", fill=TEXT, font=font(True,16))
 
     def dot(x,y,color,txt):
@@ -298,18 +297,19 @@ def render():
         ld.ellipse([x-r,y-r,x+r,y+r], outline=color, width=3)
         ld.text((x+14,y-9), txt, fill=MUTED, font=font(False,14))
 
-    Y0 = 36; X0 = 14; GAPX = 220
+    Y0 = 36; X0 = 14; GAPX = 240
     dot(X0 + 0*GAPX, Y0, GREEN,  "Vessel (generic)")
     dot(X0 + 1*GAPX, Y0, ORANGE, "Moving Vessel")
     dot(X0 + 2*GAPX, Y0, RED,    "Dark Ship (no AIS)")
     dot(X0 + 0*GAPX, Y0+34, CYAN, "Storage Tank")
-    # Pier: mini traço
     ld.line([X0 + 1*GAPX - 7, Y0+34, X0 + 1*GAPX + 7, Y0+34], fill=BLUE, width=3)
     ld.text((X0 + 1*GAPX + 14, Y0+24), "Pier / Active quay", fill=MUTED, font=font(False,14))
 
-    # créditos
-    credit = "SAR Image: Umbra — downloaded from Umbra’s publicly available files. © Umbra."
-    ld.text((12, leg_h-24), credit, fill=MUTED, font=font(False,12))
+    # créditos (2 linhas, estilo relatório)
+    credit1 = "SAR Image: Umbra — downloaded from Umbra’s publicly available files. © Umbra."
+    credit2 = "Imagery courtesy of Umbra Space; processed via MAVIPE DAP ATLAS (non-commercial demo use)."
+    ld.text((12, leg_h-44), credit1, fill=MUTED, font=font(False,12))
+    ld.text((12, leg_h-24), credit2, fill=MUTED, font=font(False,12))
 
     panel.paste(legend,(16,gy)); gy += legend.size[1] + 8
 
