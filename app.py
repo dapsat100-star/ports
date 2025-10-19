@@ -1,9 +1,10 @@
-# ================== SITREP — Dark Ships Panel (with PNG/SVG/PDF export) ==================
+# ================== DAP ATLAS — Port Yard Counting SaaS ==================
 from datetime import datetime
 from base64 import b64encode
 from pathlib import Path
 import streamlit.components.v1 as components
 
+# ===== Theme
 PRIMARY   = "#00E3A5"
 ACCENT    = "#34d399"
 BG_DARK   = "#0b1221"
@@ -12,47 +13,46 @@ TEXT      = "#E6EEFC"
 MUTED     = "#9fb0c9"
 BORDER    = "rgba(255,255,255,.12)"
 
-# (optional) map image
+# ===== Optional assets
 map_img_uri = ""
-pmap = Path("darkships_map.png")  # replace with your file
+pmap = Path("yard_map.png")
 if pmap.exists() and pmap.stat().st_size > 0:
     map_img_uri = "data:image/png;base64," + b64encode(pmap.read_bytes()).decode("ascii")
 
-# logo
 logo_uri = ""
 plogo = Path("dapatlas_whitebg.png")
 if plogo.exists() and plogo.stat().st_size > 0:
     logo_uri = "data:image/png;base64," + b64encode(plogo.read_bytes()).decode("ascii")
 
-# Main target data
-AOI_ID         = "AOI BR-PA-2025-01"
-TARGET_ID      = "UNK-09F4"
-LAST_CONTACT   = "07/06/2025 09:25Z"
-POS_LATLON     = "00°52.1'S, 046°36.9'W"
-HEADING        = "250°"
-SPEED          = "11.2 kn"
-CPA            = "2.1 NM"
-ETA_BORDER     = "55 min"
-ETA_ANCHORAGE  = "108 min"
-RISK_SCORE     = 82    # 0–100
-CONFIDENCE     = 95    # %
-SEA_STATE      = "3"
-CONDITIONS     = "Night • Low Clouds"
-SENSOR         = "SAR (ScanSAR) + AIS + RF"
-PROVIDER       = "BlackSky • RF Fusion"
-NOW_LOCAL      = datetime.now().strftime("%d/%m %H:%M")
+# ===== Data (edit freely)
+AOI_ID        = "AOI CN-LN-DAL-PORT-2025-01"
+COLLECTION    = "2025-07-01 12:31 UTC"
+SOURCE        = "BlackSky Global-16 • 30 cm"
+AREA_KM2      = "0.24 km²"
+RESOLUTION    = "30 cm"
+PROCESS_TIME  = "10 s"
+CONFIDENCE    = 95
+VEHICLES_EST  = "897 ± 10%"
 
-# Nearby targets
-nearby = [
-    {"id":"MOO-211","type":"Moored","ais":"on","spd":"0.2","hdg":"—","rng":"1.3 NM"},
-    {"id":"UNK-9AB","type":"Moving","ais":"off","spd":"9.6","hdg":"243°","rng":"3.8 NM"},
-    {"id":"VES-581","type":"Moving","ais":"on","spd":"12.1","hdg":"247°","rng":"4.5 NM"},
+SECTORS = [
+    {"id":"A1","vehicles": 352,"occup":"88%","status":"High","note":"Close to threshold"},
+    {"id":"B3","vehicles": 298,"occup":"83%","status":"Medium","note":"Normal dispersion"},
+    {"id":"C2","vehicles": 189,"occup":"74%","status":"Medium","note":"Slight shadows"},
+    {"id":"D4","vehicles": 58 ,"occup":"41%","status":"Low","note":"Partial occlusion by ship"},
 ]
 
-# Upcoming passes
-passes = [
-    {"src":"SAR","t":"+ 42 min","inc":"34°","res":"0.5 m"},
-    {"src":"Optical","t":"+ 2h 15m","inc":"11°","res":"0.3 m"},
+TIMELINE = [
+    {"t":"+00:00","ev":"Image acquired (nadir ~15°)."},
+    {"t":"+00:06","ev":"AI inference complete — count & QA checks."},
+    {"t":"+00:08","ev":"Sectors consolidated; anomalies flagged (A1)."},
+    {"t":"+00:10","ev":"Report shared with Port Ops (API webhook)."},
+]
+
+FINDINGS = [
+    "Automatic vehicle yard counting with local sampling supervision.",
+    "Two sectors above 85% average occupancy (attention threshold).",
+    "Week-over-week trend: +7% in stock (last 14 days).",
+    "Full pipeline under 10 seconds — no human intervention.",
 ]
 
 html = f"""
@@ -68,23 +68,23 @@ html = f"""
 html,body{{height:100%;margin:0;background:var(--bg);color:var(--text);
   font-family: Inter, Roboto, Segoe UI, system-ui, -apple-system, Arial, sans-serif}}
 
+/* Layout */
 .stage{{min-height:100vh;display:flex;gap:18px;align-items:stretch;justify-content:center;padding:28px}}
 .mapwrap{{flex:1 1 60%;border-radius:18px;overflow:hidden;border:1px solid var(--border);
   background:linear-gradient(180deg, rgba(255,255,255,.03), rgba(255,255,255,.02)),
              radial-gradient(900px 600px at 30% 40%, rgba(255,255,255,.04), transparent 60%),
              #0a111f; box-shadow:0 18px 44px rgba(0,0,0,.55); position:relative}}
 .mapimg{{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:.9}}
-.alert{{position:absolute; left:16px; top:16px; background:#ff4242; color:#fff; font-weight:800;
-  padding:8px 12px; border-radius:10px; box-shadow:0 8px 24px rgba(0,0,0,.35); letter-spacing:.2px}}
+.overlay{{position:absolute; left:16px; top:16px; background:#0f172a; color:#dfe7ff; font-weight:800;
+  padding:8px 12px; border-radius:10px; border:1px solid var(--border); box-shadow:0 8px 24px rgba(0,0,0,.35); letter-spacing:.2px}}
 .legend{{position:absolute; left:16px; bottom:16px; background:rgba(0,0,0,.45); backdrop-filter: blur(6px) saturate(140%);
   border:1px solid var(--border); color:#dfe7ff; padding:10px 12px; border-radius:12px; font-size:.9rem; line-height:1.2}}
 .legend .row{{display:flex; align-items:center; gap:8px; margin:6px 0}}
-.legend .k{{width:14px;height:14px;border-radius:50%; display:inline-block; background:#7ade7a; box-shadow:0 0 0 2px rgba(0,0,0,.25)}}
-.legend .k.square{{border-radius:3px; background:#f7b267}}
-.legend .k.border{{background:transparent; border:2px dashed #ffd166}}
+.legend .k{{width:14px; height:14px; border-radius:3px; background:#7ade7a; display:inline-block; box-shadow:0 0 0 2px rgba(0,0,0,.25)}}
+.legend .k.warn{{background:#f7b267}} .legend .k.low{{background:#5ea8ff}}
 .scale{{position:absolute; left:16px; bottom:16px; color:#cbd6f2; font-size:.85rem; letter-spacing:.3px}}
 
-.panel{{flex:0 0 540px; display:flex; flex-direction:column; gap:12px; padding:16px;
+.panel{{flex:0 0 560px; display:flex; flex-direction:column; gap:12px; padding:16px;
   border:1px solid var(--border); border-radius:18px; background:var(--card);
   box-shadow:0 18px 44px rgba(0,0,0,.55); overflow:hidden}}
 .header{{display:flex; align-items:center; justify-content:space-between; gap:16px}}
@@ -96,25 +96,6 @@ html,body{{height:100%;margin:0;background:var(--bg);color:var(--text);
 .sub{{color:var(--muted); font-size:.85rem; margin-top:2px}}
 .badge{{background:rgba(0,227,165,.12); color:var(--primary); border:1px solid rgba(0,227,165,.25);
   padding:6px 10px; border-radius:999px; font-weight:800; font-size:.85rem; white-space:nowrap}}
-
-.hr{{height:1px; background:var(--border); margin:4px 0}}
-.toprow{{display:grid; grid-template-columns:1fr auto; gap:10px; align-items:center}}
-.card{{background:rgba(255,255,255,.04); border:1px solid var(--border); border-radius:14px; padding:12px}}
-.card h4{{margin:0 0 6px 0; font-size:.92rem; color:#dfe7ff; letter-spacing:.3px}}
-.kv{{display:flex; gap:8px; flex-wrap:wrap; color:#E6EEFC; font-size:.95rem}}
-.kv .key{{color:var(--muted)}}
-
-.gaugewrap{{display:flex; gap:10px; align-items:center}}
-.gauge{{--v: {RISK_SCORE}; width:82px; height:82px; border-radius:50%;
-  background: conic-gradient(#ff5a5a calc(var(--v)*1%), rgba(255,255,255,.10) 0);
-  display:grid; place-items:center; border:2px solid rgba(255,255,255,.12); box-shadow:inset 0 0 12px rgba(0,0,0,.35)}}
-.gauge span{{font-weight:900; font-size:1.05rem}}
-.confbar{{height:10px; border-radius:999px; background:rgba(255,255,255,.08); border:1px solid var(--border); overflow:hidden}}
-.confbar > i{{display:block; height:100%; width:{CONFIDENCE}%; background:linear-gradient(90deg, #18d8b6, #00E3A5)}}
-.statuschips{{display:flex; gap:8px; flex-wrap:wrap}}
-.chip{{display:inline-flex; align-items:center; gap:6px; padding:6px 10px; border-radius:999px; border:1px solid var(--border);
-  background:rgba(255,255,255,.04); color:#dfe7ff; font-weight:700; font-size:.8rem}}
-.chip svg{{width:14px; height:14px}}
 
 .metrics{{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px}}
 .metric{{background:rgba(255,255,255,.04); border:1px solid var(--border); border-radius:14px; padding:12px}}
@@ -138,17 +119,11 @@ ul.bullets{{margin:6px 0 0 0; padding-left:1.2rem}} ul.bullets li{{margin:8px 0}
 
 .actions{{display:flex; gap:8px; flex-wrap:wrap; margin-top:6px}}
 .btn{{display:inline-flex; align-items:center; gap:8px; padding:9px 12px; border-radius:10px; font-weight:800; font-size:.9rem; cursor:pointer; text-decoration:none}}
-.btn.primary{{background:var(--primary); color:#08121f; border:1px solid var(--primary)}}
 .btn.ghost{{background:rgba(255,255,255,.04); color:#E6EEFC; border:1px solid var(--border)}}
-.btn svg{{width:16px; height:16px}}
-
-.footer{{margin-top:8px; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap}}
+.footer{{margin-top:auto; display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap}}
 .small{{font-size:.85rem; color:{MUTED}}}
 .hint{{font-size:.8rem; color:{MUTED}}}
 .btnbar{{display:flex; gap:8px; flex-wrap:wrap}}
-
-@keyframes blink {{ 0%,100%{{opacity:1}} 50%{{opacity:.35}} }}
-.alert{{animation:blink 1.8s infinite}}
 
 .warn{{display:none; background:#222; color:#E6EEFC; border-left:4px solid #f59e0b; padding:8px 10px; border-radius:8px; margin-top:6px; font-size:.9rem}}
 </style>
@@ -157,14 +132,13 @@ ul.bullets{{margin:6px 0 0 0; padding-left:1.2rem}} ul.bullets li{{margin:8px 0}
   <div class="stage">
     <div class="mapwrap">
       {"<img class='mapimg' src='"+map_img_uri+"' alt='map'/>" if map_img_uri else ""}
-      <div class="alert">ALERT — Potentially Non-Cooperative Vessel</div>
+      <div class="overlay">AI Vehicle Yard Counting</div>
       <div class="legend">
-        <div class="row"><span class="k"></span> Moored</div>
-        <div class="row"><span class="k square"></span> Moving (AIS off)</div>
-        <div class="row"><span class="k" style="background:#5ea8ff"></span> Moving (AIS on)</div>
-        <div class="row"><span class="k border"></span> Maritime Border</div>
+        <div class="row"><span class="k"></span> Sector — High Occupancy</div>
+        <div class="row"><span class="k warn"></span> Sector — Medium</div>
+        <div class="row"><span class="k low"></span> Sector — Low</div>
       </div>
-      <div class="scale">0 — 5 — 10 NM</div>
+      <div class="scale">0 — 100 — 200 m</div>
     </div>
 
     <div class="panel" id="panel">
@@ -172,119 +146,63 @@ ul.bullets{{margin:6px 0 0 0; padding-left:1.2rem}} ul.bullets li{{margin:8px 0}
         <div class="brand">
           <div class="logo">{("<img src='"+logo_uri+"' alt='DAP ATLAS'/>" if logo_uri else "<div style='color:#000;font-weight:900'>DA</div>")}</div>
           <div>
-            <div class="ttl">DAP ATLAS — SITREP</div>
-            <div class="sub">ISR Platform (C2 Support)</div>
+            <div class="ttl">DAP ATLAS — Port SaaS</div>
+            <div class="sub">Automatic Vehicle Yard Counting</div>
           </div>
         </div>
         <div class="badge">{AOI_ID} • Live 24/7</div>
       </div>
 
-      <div class="toprow">
-        <div class="card">
-          <h4>Target Summary</h4>
-          <div class="kv">
-            <div><span class="key">ID:</span> <b>{TARGET_ID}</b></div>
-            <div><span class="key">Position:</span> {POS_LATLON}</div>
-            <div><span class="key">Last Contact:</span> {LAST_CONTACT}</div>
-            <div><span class="key">Source:</span> {SENSOR}</div>
-          </div>
-          <div class="actions">
-            <a class="btn primary" href="#" onclick="notify('task','Patrol assigned');return false;">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.64 5.64l2.12 2.12M16.24 16.24l2.12 2.12M16.24 7.76l2.12-2.12M5.64 18.36l2.12-2.12" stroke="#08121f" stroke-width="2"/></svg>
-              Assign Patrol
-            </a>
-            <a class="btn ghost" href="#" onclick="notify('mail','MRCC notified');return false;">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M4 6h16v12H4z" stroke="#E6EEFC" stroke-width="2"/><path d="M4 7l8 6 8-6" stroke="#E6EEFC" stroke-width="2"/></svg>
-              Notify MRCC
-            </a>
-          </div>
-        </div>
-        <div class="card">
-          <h4>Risk Level</h4>
-          <div class="gaugewrap">
-            <div class="gauge"><span>{RISK_SCORE}</span></div>
-            <div style="flex:1">
-              <div style="display:flex;justify-content:space-between;font-weight:800;font-size:.9rem">
-                <span>Confidence</span><span>{CONFIDENCE}%</span>
-              </div>
-              <div class="confbar"><i></i></div>
-              <div class="statuschips" style="margin-top:8px">
-                <span class="chip">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M12 3l9 7-9 7-9-7 9-7z" stroke="#dfe7ff" stroke-width="1.6"/></svg>
-                  AIS: <b>Off</b>
-                </span>
-                <span class="chip">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" stroke="#dfe7ff" stroke-width="1.6"/></svg>
-                  {CONDITIONS}
-                </span>
-                <span class="chip">
-                  <svg viewBox="0 0 24 24" fill="none"><path d="M3 12c2 0 2-2 4-2s2 2 4 2 2-2 4-2 2 2 4 2" stroke="#dfe7ff" stroke-width="1.6"/></svg>
-                  Sea State {SEA_STATE}
-                </span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
+      <!-- KPIs -->
       <div class="metrics">
-        <div class="metric"><div class="k">{HEADING}</div><div class="l">Heading</div></div>
-        <div class="metric"><div class="k">{SPEED}</div><div class="l">Speed</div></div>
-        <div class="metric"><div class="k">{CPA}</div><div class="l">CPA</div></div>
-        <div class="metric"><div class="k">{ETA_BORDER}</div><div class="l">ETA Border</div></div>
-        <div class="metric"><div class="k">{ETA_ANCHORAGE}</div><div class="l">ETA Anchorage</div></div>
-        <div class="metric"><div class="k">{PROVIDER}</div><div class="l">Providers</div></div>
+        <div class="metric"><div class="k">{VEHICLES_EST}</div><div class="l">Vehicles (estimate)</div></div>
+        <div class="metric"><div class="k">{CONFIDENCE}%</div><div class="l">Confidence</div></div>
+        <div class="metric"><div class="k">{PROCESS_TIME}</div><div class="l">Processing Time</div></div>
+        <div class="metric"><div class="k">{AREA_KM2}</div><div class="l">Analyzed Area</div></div>
+        <div class="metric"><div class="k">{RESOLUTION}</div><div class="l">Resolution</div></div>
+        <div class="metric"><div class="k">{SOURCE}</div><div class="l">Source</div></div>
       </div>
 
+      <!-- Tabs -->
       <div class="tabs">
         <input type="radio" name="t" id="t1" checked><label for="t1">Findings</label>
-        <input type="radio" name="t" id="t2"><label for="t2">Nearby Vessels</label>
-        <input type="radio" name="t" id="t3"><label for="t3">Passes</label>
-        <input type="radio" name="t" id="t4"><label for="t4">Timeline</label>
+        <input type="radio" name="t" id="t2"><label for="t2">Sectors</label>
+        <input type="radio" name="t" id="t3"><label for="t3">Timeline</label>
+        <input type="radio" name="t" id="t4"><label for="t4">Metadata</label>
 
         <div class="tabbox" id="c1">
           <ul class="bullets">
-            <li>Track consistent with approach to international border.</li>
-            <li>AIS transponder switched off for &gt; 3h, maintaining steady speed (&gt; 10 kn).</li>
-            <li>Positive RF correlation with sporadic emissions (VHF/MF).</li>
-            <li>Extrapolation indicates ETA {ETA_BORDER} to the border; {ETA_ANCHORAGE} to anchorage.</li>
+            {"".join(f"<li>{x}</li>" for x in FINDINGS)}
           </ul>
         </div>
 
         <div class="tabbox" id="c2" style="display:none">
           <table class="tbl">
-            <thead><tr><th>ID</th><th>Type</th><th>AIS</th><th>SPD</th><th>HDG</th><th>Range</th></tr></thead>
+            <thead><tr><th>Sector</th><th>Vehicles</th><th>Occupancy</th><th>Status</th><th>Notes</th></tr></thead>
             <tbody>
-              {"".join(f"<tr><td>{r['id']}</td><td>{r['type']}</td><td>{r['ais']}</td><td>{r['spd']} kn</td><td>{r['hdg']}</td><td>{r['rng']}</td></tr>" for r in nearby)}
+              {"".join(f"<tr><td>{r['id']}</td><td>{r['vehicles']}</td><td>{r['occup']}</td><td>{r['status']}</td><td>{r['note']}</td></tr>" for r in SECTORS)}
             </tbody>
           </table>
-        </div>
-
-        <div class="tabbox" id="c3" style="display:none">
-          <table class="tbl">
-            <thead><tr><th>Sensor</th><th>T (ETA)</th><th>Inc.</th><th>Resolution</th></tr></thead>
-            <tbody>
-              {"".join(f"<tr><td>{r['src']}</td><td>{r['t']}</td><td>{r['inc']}</td><td>{r['res']}</td></tr>" for r in passes)}
-            </tbody>
-          </table>
-          <div class="actions" style="margin-top:10px">
-            <a class="btn primary" href="#" onclick="notify('task','New SAR collection requested');return false;">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M12 20a8 8 0 108-8" stroke="#08121f" stroke-width="2"/><path d="M12 12l8-8" stroke="#08121f" stroke-width="2"/></svg>
-              Task SAR
-            </a>
-            <a class="btn ghost" href="#" onclick="notify('task','Optical collection requested');return false;">
-              <svg viewBox="0 0 24 24" fill="none"><path d="M4 8h16v10H4z" stroke="#E6EEFC" stroke-width="2"/><circle cx="12" cy="13" r="3.5" stroke="#E6EEFC" stroke-width="2"/></svg>
-              Task Optical
-            </a>
+          <div class="actions">
+            <a class="btn ghost" href="#" onclick="notify('ok','Sector A1 priority check queued');return false;">Queue QA — A1</a>
+            <a class="btn ghost" href="#" onclick="notify('ok','Webhook sent to Port Ops');return false;">Send Webhook</a>
           </div>
         </div>
 
-        <div class="tabbox" id="c4" style="display:none">
+        <div class="tabbox" id="c3" style="display:none">
           <ul class="bullets">
-            <li>{LAST_CONTACT}: SAR hull detection with heading {HEADING} and speed {SPEED}.</li>
-            <li>{NOW_LOCAL}: Position extrapolation and ETA update.</li>
-            <li>+3 min: intermittent RF ping (VHF). Current confidence {CONFIDENCE}%.</li>
+            {"".join(f"<li><b>{r['t']}</b> — {r['ev']}</li>" for r in TIMELINE)}
           </ul>
+        </div>
+
+        <div class="tabbox" id="c4" style="display:none">
+          <table class="tbl">
+            <tr><th>Collection</th><td>{COLLECTION}</td></tr>
+            <tr><th>AOI</th><td>{AOI_ID}</td></tr>
+            <tr><th>Source</th><td>{SOURCE}</td></tr>
+            <tr><th>Area</th><td>{AREA_KM2}</td></tr>
+            <tr><th>Resolution</th><td>{RESOLUTION}</td></tr>
+          </table>
         </div>
       </div>
 
@@ -298,19 +216,19 @@ ul.bullets{{margin:6px 0 0 0; padding-left:1.2rem}} ul.bullets li{{margin:8px 0}
         <div class="hint">Shortcuts: <b>G</b> PNG • <b>S</b> SVG • <b>P</b> PDF</div>
       </div>
 
-      <div id="cdnWarn" class="warn">⚠️ Export libraries failed to load (network blocked). Keyboard exports and buttons may not work on this network.</div>
+      <div id="cdnWarn" class="warn">⚠️ Export libraries failed to load (network blocked). Try another network or VPN.</div>
     </div>
   </div>
 
-  <!-- export libs -->
+  <!-- CDN failure detector -->
   <script>
-    // Warn if a <script> fails (e.g., CDN blocked)
     window.addEventListener('error', function(e){{
       if ((e.target||{{}}).tagName==='SCRIPT') {{
         var el=document.getElementById('cdnWarn'); if(el) el.style.display='block';
       }}
     }}, true);
   </script>
+  <!-- Export libs -->
   <script src="https://cdn.jsdelivr.net/npm/dom-to-image-more@2.8.0/dist/dom-to-image-more.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/svg2pdf.js@2.2.3/dist/svg2pdf.umd.min.js"></script>
@@ -323,7 +241,7 @@ ul.bullets{{margin:6px 0 0 0; padding-left:1.2rem}} ul.bullets li{{margin:8px 0}
     document.getElementById('t3').onchange=()=>{{c1.style.display='none'; c2.style.display='none'; c3.style.display='block'; c4.style.display='none';}};
     document.getElementById('t4').onchange=()=>{{c1.style.display='none'; c2.style.display='none'; c3.style.display='none'; c4.style.display='block';}};
 
-    // Simple toast/notify
+    // Toast
     function notify(kind,msg){{
       const n=document.createElement('div');
       n.textContent=msg;
@@ -332,23 +250,22 @@ ul.bullets{{margin:6px 0 0 0; padding-left:1.2rem}} ul.bullets li{{margin:8px 0}
       setTimeout(()=>n.remove(), 2200);
     }}
 
-    // Export helpers
+    // Export
     const PANEL = document.getElementById('panel');
     function trigger(url,filename){{
       try{{ const a=document.createElement('a'); a.href=url; a.download=filename; a.rel='noopener'; a.target='_blank'; document.body.appendChild(a); a.click(); a.remove(); }}
       catch(e){{ window.open(url,'_blank','noopener'); }}
     }}
-
     async function exportPNG(){{
       try {{
         const dataUrl=await domtoimage.toPng(PANEL,{{bgcolor:'{CARD_DARK}',quality:1}});
-        trigger(dataUrl,'SITREP_Panel.png');
+        trigger(dataUrl,'PORT_SaaS.png');
       }} catch(e) {{ notify('err','PNG export failed'); }}
     }}
     async function exportSVG(){{
       try {{
         const dataUrl = await domtoimage.toSvg(PANEL, {{ bgcolor: '{CARD_DARK}', quality: 1 }});
-        trigger(dataUrl,'SITREP_Panel.svg');
+        trigger(dataUrl,'PORT_SaaS.svg');
       }} catch(e) {{ notify('err','SVG export failed'); }}
     }}
     async function exportPDF(){{
@@ -362,18 +279,19 @@ ul.bullets{{margin:6px 0 0 0; padding-left:1.2rem}} ul.bullets li{{margin:8px 0}
         const pageW = pdf.internal.pageSize.getWidth(), pageH = pdf.internal.pageSize.getHeight();
         const scale = Math.min(pageW/width, pageH/height);
         window.svg2pdf(svgEl, pdf, {{ x:(pageW-width*scale)/2, y:(pageH-height*scale)/2, scale }});
-        const blob = pdf.output('blob'); const url = URL.createObjectURL(blob); trigger(url,'SITREP_Panel.pdf');
+        const blob = pdf.output('blob'); const url = URL.createObjectURL(blob); trigger(url,'PORT_SaaS.pdf');
       }} catch(e) {{ notify('err','PDF export failed'); }}
     }}
 
-    // Keyboard shortcuts
-    document.addEventListener('keydown', e=>{{ 
+    // Shortcuts
+    document.addEventListener('keydown', e=>{{
       if(e.key==='g'||e.key==='G') exportPNG();
-      if(e.key==='s'||e.key==='S') exportSVG(); 
-      if(e.key==='p'||e.key==='P') exportPDF(); 
+      if(e.key==='s'||e.key==='S') exportSVG();
+      if(e.key==='p'||e.key==='P') exportPDF();
     }});
   </script>
 </body></html>
 """
 
-components.html(html, height=1200, scrolling=True)
+components.html(html, height=1100, scrolling=True)
+
